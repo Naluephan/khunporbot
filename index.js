@@ -98,6 +98,99 @@ client.on('messageCreate', async (message) => {
         );
         await message.reply({ embeds: [embed], components: [row] });
     }
+
+    // --- !clear (ลบข้อความ) [PRACTICAL FUNCTION] ---
+    if (message.content.startsWith('!clear')) {
+        if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
+            return message.reply('❌ คุณไม่มีสิทธิ์จัดการข้อความครับ');
+        }
+        const amount = parseInt(message.content.split(' ')[1]);
+        if (isNaN(amount) || amount < 1 || amount > 100) {
+            return message.reply('⚠️ กรุณาระบุจำนวน 1-100 เช่น `!clear 10`');
+        }
+        try {
+            await message.channel.bulkDelete(amount, true);
+            const m = await message.channel.send(`🧹 ล้างบางไปแล้ว ${amount} ข้อความ!`);
+            setTimeout(() => m.delete().catch(() => { }), 4000);
+        } catch (e) {
+            message.reply('❌ ไม่สามารถลบข้อความที่เก่าเกิน 14 วันได้ครับ');
+        }
+    }
+
+    // --- !poll (สร้างโพล) [PRACTICAL FUNCTION] ---
+    if (message.content.startsWith('!poll')) {
+        const question = message.content.replace('!poll', '').trim();
+        if (!question) return message.reply('⚠️ กรุณาใส่คำถาม เช่น `!poll พรุ่งนี้หยุดไหม?`');
+
+        const embed = new EmbedBuilder()
+            .setColor('#00FF00')
+            .setTitle('📊 โพลสำรวจความคิดเห็น')
+            .setDescription(`**${question}**`)
+            .setFooter({ text: `สร้างโดย: ${message.author.tag}` })
+            .setTimestamp();
+
+        const pollMsg = await message.channel.send({ embeds: [embed] });
+        await pollMsg.react('👍');
+        await pollMsg.react('👎');
+    }
+
+    // --- !userinfo (ดูข้อมูลผู้ใช้) [PRACTICAL FUNCTION] ---
+    if (message.content.startsWith('!userinfo')) {
+        const member = message.mentions.members.first() || message.member;
+        const target = member.user;
+
+        const embed = new EmbedBuilder()
+            .setColor('#00FFFF')
+            .setTitle(`📋 ข้อมูลผู้ใช้: ${target.tag}`)
+            .setThumbnail(target.displayAvatarURL())
+            .addFields(
+                { name: '🆔 ID', value: target.id, inline: true },
+                { name: '📅 สร้างบัญชีเมื่อ', value: `<t:${Math.floor(target.createdTimestamp / 1000)}:d>`, inline: true },
+                { name: '🚪 เข้าเซิร์ฟเมื่อ', value: `<t:${Math.floor(member.joinedTimestamp / 1000)}:d>`, inline: true },
+                { name: '🏷️ ยศที่มี', value: member.roles.cache.filter(r => r.name !== '@everyone').map(r => `<@&${r.id}>`).join(' ') || 'ไม่มี', inline: false }
+            );
+        message.reply({ embeds: [embed] });
+    }
+
+    // --- !avatar (ดึงรูปโปรไฟล์ชัดๆ) [PRACTICAL FUNCTION] ---
+    if (message.content.startsWith('!avatar')) {
+        const target = message.mentions.users.first() || message.author;
+        const embed = new EmbedBuilder()
+            .setColor('#FF0099')
+            .setTitle(`🖼️ รูปโปรไฟล์ของ ${target.username}`)
+            .setImage(target.displayAvatarURL({ size: 1024, dynamic: true }));
+
+        message.reply({ embeds: [embed] });
+    }
+
+    // --- !serverinfo (ดูข้อมูลเซิร์ฟเวอร์) [PRACTICAL FUNCTION] ---
+    if (message.content.startsWith('!serverinfo')) {
+        const guild = message.guild;
+        const embed = new EmbedBuilder()
+            .setColor('#FFA500')
+            .setTitle(`🏰 ข้อมูลเซิร์ฟเวอร์: ${guild.name}`)
+            .setThumbnail(guild.iconURL())
+            .addFields(
+                { name: '🆔 ID', value: guild.id, inline: true },
+                { name: '👥 สมาชิก', value: `${guild.memberCount} คน`, inline: true },
+                { name: '📅 สร้างเมื่อ', value: `<t:${Math.floor(guild.createdTimestamp / 1000)}:d>`, inline: true },
+                { name: '👑 เจ้าของ', value: `<@${guild.ownerId}>`, inline: true },
+                { name: '🏷️ ยศทั้งหมด', value: `${guild.roles.cache.size} ยศ`, inline: true }
+            );
+        message.reply({ embeds: [embed] });
+    }
+
+    // --- !ping (เช็คความหน่วง) [PRACTICAL FUNCTION] ---
+    if (message.content === '!ping') {
+        const sent = await message.reply('🏓 Pinging...');
+        sent.edit(`🏓 Pong! Latency: ${sent.createdTimestamp - message.createdTimestamp}ms`);
+    }
+
+    // --- !roll (ทอยลูกเต๋า) [PRACTICAL FUNCTION] ---
+    if (message.content.startsWith('!roll')) {
+        const result = Math.floor(Math.random() * 6) + 1;
+        message.reply(`🎲 ทอยลูกเต๋าได้: **${result}** แต้ม`);
+    }
 });
 
 client.on('interactionCreate', async (interaction) => {
