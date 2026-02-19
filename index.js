@@ -36,7 +36,7 @@ const client = new Client({
 
 // ตั้งค่า AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const aiModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+const aiModel = genAI.getGenerativeModel({ model: "gemini-3.0-flash" });
 
 // ฐานข้อมูลจำลอง
 const db = {
@@ -62,6 +62,34 @@ client.once('clientReady', (c) => {
 
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
+
+    // --- 🤖 AI CHAT (Tag or !ask) ---
+    if (message.content.startsWith('!ask') || message.mentions.has(client.user)) {
+        const query = message.content.replace('!ask', '').replace(/<@!?[0-9]+>/, '').trim();
+        if (!query) return message.reply('❓ ถามอะไรหน่อยสิครับ');
+
+        await message.channel.sendTyping();
+        try {
+            const result = await aiModel.generateContent(query);
+            const response = result.response.text();
+
+            // แบ่งข้อความถ้าเกิน 2000 ตัวอักษร
+            if (response.length > 2000) {
+                for (let i = 0; i < response.length; i += 2000) {
+                    await message.reply(response.substring(i, i + 2000));
+                }
+            } else {
+                await message.reply(response);
+            }
+        } catch (error) {
+            console.error('AI Error:', error);
+            if (error.message.includes('429')) {
+                return message.reply('⏳ ตอนนี้ AI ใช้งานหนักเกินลิมิต โปรดรอสักครู่แล้วลองใหม่ครับ');
+            }
+            message.reply('❌ เกิดข้อผิดพลาดในการเชื่อมต่อกับ AI');
+        }
+        return; // จบการทำงาน ไม่ต้องไปทำอย่างอื่นต่อ
+    }
 
     db.xp.set(message.author.id, (db.xp.get(message.author.id) || 0) + 2);
 
@@ -190,6 +218,47 @@ client.on('messageCreate', async (message) => {
     if (message.content.startsWith('!roll')) {
         const result = Math.floor(Math.random() * 6) + 1;
         message.reply(`🎲 ทอยลูกเต๋าได้: **${result}** แต้ม`);
+    }
+
+    // --- !coin (โยนเหรียญ) [PRACTICAL FUNCTION] ---
+    if (message.content.startsWith('!coin')) {
+        const result = Math.random() < 0.5 ? 'หัว (Heads)' : 'ก้อย (Tails)';
+        message.reply(`🪙 ผลการโยนเหรียญ: **${result}**`);
+    }
+
+    // --- !say (ให้บอทพูดแทน) [PRACTICAL FUNCTION] ---
+    if (message.content.startsWith('!say')) {
+        if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
+        const msg = message.content.replace('!say', '').trim();
+        if (!msg) return message.reply('❌ กรุณาพิมพ์ข้อความที่จะให้บอทพูด');
+        await message.delete();
+        await message.channel.send(msg);
+    }
+
+    // --- !calc (เครื่องคิดเลข) [PRACTICAL FUNCTION] ---
+    if (message.content.startsWith('!calc')) {
+        try {
+            const expr = message.content.replace('!calc', '').trim();
+            if (!expr) return message.reply('❌ กรุณาใส่โจทย์เลข เช่น `!calc 10+20`');
+
+            // ใช้ Function ปลอดภัยกว่า eval เล็กน้อย แต่ยังต้องระวัง
+            // ในที่นี้รับเฉพาะตัวเลขและเครื่องหมายทางคณิตศาสตร์
+            if (!/^[0-9+\-*/().\s]+$/.test(expr)) {
+                return message.reply('❌ โปรดใส่เฉพาะตัวเลขและเครื่องหมาย +, -, *, /');
+            }
+
+            const result = Function(`return (${expr})`)();
+            const embed = new EmbedBuilder()
+                .setColor('#00AAFF')
+                .setTitle('🧮 เครื่องคิดเลข')
+                .addFields(
+                    { name: 'โจทย์', value: `\`\`\`${expr}\`\`\``, inline: false },
+                    { name: 'ผลลัพธ์', value: `\`\`\`${result}\`\`\``, inline: false }
+                );
+            message.reply({ embeds: [embed] });
+        } catch (e) {
+            message.reply('❌ คำนวณไม่ได้ครับ ตรวจสอบโจทย์อีกครั้ง');
+        }
     }
 });
 
