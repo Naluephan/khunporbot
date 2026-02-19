@@ -37,7 +37,14 @@ const client = new Client({
 // ตั้งค่า AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 // ใช้ gemini-flash-latest (เวอร์ชั่น 1.5) ที่ทดสอบแล้วว่ายังไม่ติด Limit
-const aiModel = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
+const aiModel = genAI.getGenerativeModel({
+    model: "gemini-flash-latest",
+    tools: [
+        {
+            googleSearch: {}
+        }
+    ]
+});
 
 // ฐานข้อมูลจำลอง
 const db = {

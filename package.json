@@ -17,6 +17,7 @@
     "dotenv": "^17.2.4",
     "libsodium-wrappers": "^0.8.2",
     "mathjs": "^15.1.0",
+    "mongoose": "^9.2.1",
     "opusscript": "^0.0.8"
   }
 }
