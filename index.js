@@ -38,7 +38,8 @@ const client = new Client({
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 // ใช้ gemini-flash-latest (เวอร์ชั่น 1.5) ที่ทดสอบแล้วว่ายังไม่ติด Limit
 const aiModel = genAI.getGenerativeModel({
-    model: "gemini-flash-latest",
+    model: "gemini-2.5-flash",
+    systemInstruction: "คุณคือ AI ผู้ช่วยของเซิร์ฟเวอร์ NaluephanBot หน้าที่ของคุณคือให้ความช่วยเหลือ ตอบคำถาม และสร้างความบันเทิงให้กับสมาชิกในเซิร์ฟเวอร์อย่างเป็นมิตรและสุภาพ",
     tools: [
         {
             googleSearch: {}
