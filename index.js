@@ -36,8 +36,8 @@ const client = new Client({
 
 // ตั้งค่า AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-// ใช้ gemini-2.0-flash ที่ได้รับการยืนยันว่าใช้งานได้ (3.0 ยังไม่มีในรายการครับ)
-const aiModel = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+// ใช้ gemini-flash-latest (เวอร์ชั่น 1.5) ที่ทดสอบแล้วว่ายังไม่ติด Limit
+const aiModel = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
 
 // ฐานข้อมูลจำลอง
 const db = {
