@@ -310,4 +310,69 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
+// --- 💤 AFK SYSTEM ---
+const AFK_CHANNEL_NAME = 'AFK';
+const AFK_TIMEOUT_MS = 30 * 60 * 1000; // 30 นาที
+const afkTimers = new Map(); // เก็บ userId -> timestamp
+
+client.on('voiceStateUpdate', (oldState, newState) => {
+    // ถ้าไม่ได้อยู่ในช่องเสียง ให้ลบ Timer
+    if (!newState.channelId) {
+        afkTimers.delete(newState.member.id);
+        return;
+    }
+
+    // เช็คว่า Self-Mute หรือ Self-Deafen หรือไม่
+    const isAfk = newState.selfMute || newState.selfDeaf;
+
+    if (isAfk) {
+        // ถ้าเริ่ม AFK และยังไม่มี Timer ให้เริ่มจับเวลา
+        if (!afkTimers.has(newState.member.id)) {
+            afkTimers.set(newState.member.id, Date.now());
+            console.log(`💤 ${newState.member.user.tag} เริ่ม AFK จับเวลา...`);
+        }
+    } else {
+        // ถ้ากลับมาปกติ (เลิก Mute/Deafen) ให้ลบ Timer
+        if (afkTimers.has(newState.member.id)) {
+            afkTimers.delete(newState.member.id);
+            console.log(`✅ ${newState.member.user.tag} กลับมา Active แล้ว`);
+        }
+    }
+});
+
+// ตรวจสอบคน AFK ทุกๆ 1 นาที
+setInterval(async () => {
+    const now = Date.now();
+    for (const [userId, startTime] of afkTimers) {
+        if (now - startTime >= AFK_TIMEOUT_MS) {
+            try {
+                // หา Guild (สมมติว่าบอทอยู่ Guild เดียว หรือจะ loop guild ก็ได้ แต่ที่นี่เอาแบบง่ายก่อน)
+                // เนื่องจาก afkTimers เก็บ userId เราต้องหา Member Object
+                // วิธีที่ดีคือเราควรเก็บ GuildId ไว้ด้วยใน Map หรือวนหาจาก client.guilds
+
+                // เพื่อความชัวร์ วนลูปทุก Guild ที่บอทอยู่ (กรณี Multi-Server)
+                for (const guild of client.guilds.cache.values()) {
+                    const member = guild.members.cache.get(userId);
+                    if (!member || !member.voice.channelId) continue;
+
+                    // หาห้อง AFK
+                    const afkChannel = guild.channels.cache.find(c => c.name === AFK_CHANNEL_NAME && c.type === ChannelType.GuildVoice);
+
+                    if (afkChannel && member.voice.channelId !== afkChannel.id) {
+                        await member.voice.setChannel(afkChannel);
+                        afkTimers.delete(userId); // ย้ายแล้วลบ Timer ออก
+                        console.log(`🚀 ย้าย ${member.user.tag} ไปห้อง ${AFK_CHANNEL_NAME} แล้ว (AFK เกิน 30 นาที)`);
+
+                        // แจ้งเตือนในห้องเดิม (Optional)
+                        // const oldChannel = guild.channels.cache.get(member.voice.channelId);
+                        // if (oldChannel) oldChannel.send(`💤 ย้าย <@${userId}> ไปห้องพักเนื่องจาก AFK นานเกินไป`);
+                    }
+                }
+            } catch (err) {
+                console.error(`❌ ย้ายคน AFK พลาด: ${err.message}`);
+            }
+        }
+    }
+}, 60 * 1000); // เช็คทุก 1 นาที
+
 client.login(process.env.DISCORD_TOKEN);
