@@ -69,6 +69,9 @@ client.once('clientReady', (c) => {
     console.log(`======================================\n`);
 });
 
+// ตัวแปรสำหรับ AI Memory (เก็บประวัติการสนทนา)
+const aiMemory = new Map(); // เก็บ userId -> history array
+
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
@@ -79,8 +82,26 @@ client.on('messageCreate', async (message) => {
 
         await message.channel.sendTyping();
         try {
-            const result = await aiModel.generateContent(query);
+            // ดึงประวัติการคุยของ User คนนี้ (เก็บสูงสุด 5 ข้อความล่าสุด)
+            let history = aiMemory.get(message.author.id) || [];
+
+            // เพิ่มคำถามใหม่เข้าไปในประวัติ
+            history.push({ role: "user", parts: [{ text: query }] });
+
+            // ใช้ระบบ Chat Session เพื่อให้จำบริบท
+            const chatSession = aiModel.startChat({
+                history: history
+            });
+
+            const result = await chatSession.sendMessage(query);
             const response = result.response.text();
+
+            // เพิ่มคำตอบของ AI เข้าไปในประวัติ
+            history.push({ role: "model", parts: [{ text: response }] });
+
+            // จำแค่ 10 ข้อความล่าสุด (ถาม 5, ตอบ 5) เพื่อไม่ให้เปลือง Token
+            if (history.length > 10) history = history.slice(history.length - 10);
+            aiMemory.set(message.author.id, history);
 
             // แบ่งข้อความถ้าเกิน 2000 ตัวอักษร
             if (response.length > 2000) {
@@ -92,10 +113,12 @@ client.on('messageCreate', async (message) => {
             }
         } catch (error) {
             console.error('AI Error:', error);
-            if (error.message.includes('429')) {
+            if (error?.message?.includes('429')) {
                 return message.reply('⏳ ตอนนี้ AI ใช้งานหนักเกินลิมิต โปรดรอสักครู่แล้วลองใหม่ครับ');
             }
             message.reply('❌ เกิดข้อผิดพลาดในการเชื่อมต่อกับ AI');
+            // รีเซ็ตความจำถ้าเกิด Error ป้องกันค้าง
+            aiMemory.delete(message.author.id);
         }
         return; // จบการทำงาน ไม่ต้องไปทำอย่างอื่นต่อ
     }
@@ -269,10 +292,249 @@ client.on('messageCreate', async (message) => {
             message.reply('❌ คำนวณไม่ได้ครับ ตรวจสอบโจทย์อีกครั้ง');
         }
     }
+
+    // --- 🏆 !top (ตารางผู้นำท็อป 5) [NEW FUNCTION] ---
+    if (message.content.startsWith('!top') || message.content.startsWith('!leaderboard')) {
+        const topXP = [...db.xp.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+        const topMoney = [...db.economy.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+        const xpText = topXP.length > 0
+            ? topXP.map((entry, i) => `**#${i + 1}** <@${entry[0]}> - เลเวล: ${Math.floor(Math.sqrt(entry[1] / 10))} (${entry[1]} XP)`).join('\n')
+            : 'ยังไม่มีข้อมูล';
+
+        const moneyText = topMoney.length > 0
+            ? topMoney.map((entry, i) => `**#${i + 1}** <@${entry[0]}> - 💰 ${entry[1]} เหรียญ`).join('\n')
+            : 'ยังไม่มีข้อมูล';
+
+        const embed = new EmbedBuilder()
+            .setColor('#FFD700')
+            .setTitle('🏆 กระดานผู้นำ (Leaderboard)')
+            .addFields(
+                { name: '⭐ ท็อปเลเวล (XP)', value: xpText, inline: false },
+                { name: '💶 ท็อปเศรษฐี (เงิน)', value: moneyText, inline: false }
+            )
+            .setTimestamp();
+
+        return message.reply({ embeds: [embed] });
+    }
+
+    // --- 🎰 !slots (เล่นสล็อตเดิมพัน) [NEW FUNCTION] ---
+    if (message.content.startsWith('!slots')) {
+        const args = message.content.split(' ');
+        const bet = parseInt(args[1]);
+        const userMoney = db.economy.get(message.author.id) || 0;
+
+        if (isNaN(bet) || bet <= 0) return message.reply('⚠️ ระบุจำนวนเงินเดิมพันด้วย เช่น `!slots 10`');
+        if (bet > userMoney) return message.reply('❌ เงินคุณไม่พอครับ!');
+
+        const fruits = ['🍎', '🍌', '🍒', '🍇', '🍉', '💎'];
+        const slot1 = fruits[Math.floor(Math.random() * fruits.length)];
+        const slot2 = fruits[Math.floor(Math.random() * fruits.length)];
+        const slot3 = fruits[Math.floor(Math.random() * fruits.length)];
+
+        let resultText = '';
+
+        db.economy.set(message.author.id, userMoney - bet); // หักเงินก่อน
+
+        if (slot1 === slot2 && slot2 === slot3) {
+            let winAmount = bet * 10;
+            if (slot1 === '💎') winAmount = bet * 50; // แจ็คพอตใหญ่
+            db.economy.set(message.author.id, db.economy.get(message.author.id) + winAmount);
+            resultText = `🎉 **แจ็คพอตแตก!** ได้รับ ${winAmount} เหรียญ`;
+        } else if (slot1 === slot2 || slot2 === slot3 || slot1 === slot3) {
+            const winAmount = bet * 2;
+            db.economy.set(message.author.id, db.economy.get(message.author.id) + winAmount);
+            resultText = `😁 **ชนะนิดหน่อย!** ได้รับ ${winAmount} เหรียญ`;
+        } else {
+            resultText = `😢 **เสียใจด้วย!** คุณเสียเดิมพัน ${bet} เหรียญ`;
+        }
+
+        const embed = new EmbedBuilder()
+            .setColor('#FFA500')
+            .setTitle('🎰 สล็อตแมชชีน')
+            .setDescription(`**[  ${slot1}  |  ${slot2}  |  ${slot3}  ]**\n\n${resultText}`)
+            .setFooter({ text: `ยอดเงินคงเหลือ: ${db.economy.get(message.author.id)} เหรียญ` });
+
+        return message.reply({ embeds: [embed] });
+    }
+
+    // --- ✌️ !rps (เป่ายิ้งฉุบ) [NEW FUNCTION] ---
+    if (message.content.startsWith('!rps')) {
+        const args = message.content.split(' ');
+        const playerChoice = args[1]?.toLowerCase();
+        const choices = ['ค้อน', 'กรรไกร', 'กระดาษ'];
+
+        if (!playerChoice || !['ค้อน', 'กรรไกร', 'กระดาษ', 'rock', 'paper', 'scissors'].includes(playerChoice)) {
+            return message.reply('⚠️ ระบุตัวเลือกด้วยครับ: `!rps ค้อน` หรือ `!rps กระดาษ` หรือ `!rps กรรไกร`');
+        }
+
+        let mappedPlayer = playerChoice;
+        if (playerChoice === 'rock') mappedPlayer = 'ค้อน';
+        if (playerChoice === 'paper') mappedPlayer = 'กระดาษ';
+        if (playerChoice === 'scissors') mappedPlayer = 'กรรไกร';
+
+        const botChoice = choices[Math.floor(Math.random() * choices.length)];
+        let result = '';
+
+        if (mappedPlayer === botChoice) result = '🤝 **เสมอ!**';
+        else if (
+            (mappedPlayer === 'ค้อน' && botChoice === 'กรรไกร') ||
+            (mappedPlayer === 'กรรไกร' && botChoice === 'กระดาษ') ||
+            (mappedPlayer === 'กระดาษ' && botChoice === 'ค้อน')
+        ) {
+            result = '🎉 **คุณชนะ!**';
+            db.economy.set(message.author.id, (db.economy.get(message.author.id) || 0) + 10);
+            result += ' (ได้รับ 10 เหรียญเป็นรางวัล)';
+        } else {
+            result = '😭 **คุณแพ้!**';
+        }
+
+        return message.reply(`คุณออก: **${mappedPlayer}**\nบอทออก: **${botChoice}**\n\n${result}`);
+    }
+
+    // --- ⏰ !remindme (ตั้งเวลาเตือน) [NEW FUNCTION] ---
+    if (message.content.startsWith('!remindme')) {
+        const args = message.content.split(' ');
+        const timeStr = args[1]; // เช่น 10m
+        const reminderText = args.slice(2).join(' ');
+
+        if (!timeStr || !reminderText || (!timeStr.endsWith('m') && !timeStr.endsWith('h'))) {
+            return message.reply('⚠️ วิธีใช้: `!remindme <เวลา> <ข้อความ>` เช่น `!remindme 10m ไปตากผ้า` หรือ `!remindme 1h` (รองรับ m และ h)');
+        }
+
+        let timeMs = 0;
+        let timeLabel = '';
+        if (timeStr.endsWith('m')) {
+            const mins = parseInt(timeStr);
+            if (isNaN(mins)) return message.reply('❌ รูปแบบเวลาไม่ถูกต้อง');
+            timeMs = mins * 60 * 1000;
+            timeLabel = `${mins} นาที`;
+        } else if (timeStr.endsWith('h')) {
+            const hrs = parseInt(timeStr);
+            if (isNaN(hrs)) return message.reply('❌ รูปแบบเวลาไม่ถูกต้อง');
+            timeMs = hrs * 60 * 60 * 1000;
+            timeLabel = `${hrs} ชั่วโมง`;
+        }
+
+        if (timeMs <= 0 || timeMs > 24 * 60 * 60 * 1000) {
+            return message.reply('❌ ระบุเวลาให้ถูกต้อง (รับไม่เกิน 24 ชั่วโมง)');
+        }
+
+        message.reply(`✅ รับทราบ! ระบบจะแจ้งเตือนคุณในอีก **${timeLabel}** ข้างหน้าเกี่ยวกับ: *"${reminderText}"*`);
+
+        setTimeout(() => {
+            message.author.send(`⏰ **ถึงเวลาแล้ว!** ระบบแจ้งเตือนของคุณ:\n> "${reminderText}"\n(ตั้งเตือนมาจากเซิร์ฟเวอร์ ${message.guild?.name || 'DM'})`).catch(() => {
+                message.channel.send(`⏰ <@${message.author.id}> **ถึงเวลาแล้ว!**\n> "${reminderText}"`);
+            });
+        }, timeMs);
+        return;
+    }
+
+    // --- 🎁 !giveaway (แจกของรางวัล) [NEW FUNCTION] ---
+    if (message.content.startsWith('!giveaway')) {
+        if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) {
+            return message.reply('❌ คุณต้องเป็นแอดมินหรือมีสิทธิ์พิเศษถึงจะจัดกิจกรรมแจกของได้ครับ');
+        }
+
+        const args = message.content.split(' ');
+        const timeStr = args[1];
+        const prize = args.slice(2).join(' ');
+
+        if (!timeStr || !prize || (!timeStr.endsWith('m') && !timeStr.endsWith('h'))) {
+            return message.reply('⚠️ วิธีใช้: `!giveaway <เวลา> <ของรางวัล>` เช่น `!giveaway 1m VIP Role` (รองรับ m นาที / h ชั่วโมง)');
+        }
+
+        let timeMs = 0;
+        if (timeStr.endsWith('m')) timeMs = parseInt(timeStr) * 60 * 1000;
+        else if (timeStr.endsWith('h')) timeMs = parseInt(timeStr) * 60 * 60 * 1000;
+
+        if (isNaN(timeMs) || timeMs <= 0 || timeMs > 24 * 60 * 60 * 1000) {
+            return message.reply('❌ ระบุเวลาให้ถูกต้อง (ไม่เกิน 24h)');
+        }
+
+        const endTime = Math.floor((Date.now() + timeMs) / 1000);
+
+        const embed = new EmbedBuilder()
+            .setColor('#FF00FF')
+            .setTitle('🎁 **กิจกรรมแจกของรางวัล (Giveaway)!**')
+            .setDescription(`**รางวัล:** ${prize}\n**หมดเวลา:** <t:${endTime}:R>\n**ผู้จัด:** <@${message.author.id}>\n\n🚨 **กดรีแอคชัน 🎉 ด้านล่างข้อความนี้เพื่อเข้าร่วม!**`)
+            .setTimestamp(Date.now() + timeMs);
+
+        const giveMsg = await message.channel.send({ content: '🎉 **GIVEAWAY START!** 🎉', embeds: [embed] });
+        await giveMsg.react('🎉');
+
+        setTimeout(async () => {
+            try {
+                const fetchMsg = await message.channel.messages.fetch(giveMsg.id);
+                const reaction = fetchMsg.reactions.cache.get('🎉');
+                if (!reaction) return;
+
+                const users = await reaction.users.fetch();
+                const validUsers = users.filter(u => !u.bot).map(u => u.id);
+
+                if (validUsers.length === 0) {
+                    return message.channel.send(`😔 ไม่มีคนเข้าร่วมชิงรางวัล **${prize}** เลย`);
+                }
+
+                const winner = validUsers[Math.floor(Math.random() * validUsers.length)];
+                message.channel.send(`🎉 ขอแสดงความยินดีกับ <@${winner}>! คุณโชคดีได้รับ **${prize}** 🎁 (ผู้จัด: <@${message.author.id}>)`);
+
+                const endEmbed = new EmbedBuilder()
+                    .setColor('#808080')
+                    .setTitle('🎁 **กิจกรรมแจกของรางวัลจบแล้ว**')
+                    .setDescription(`**รางวัล:** ${prize}\n**ผู้ชนะ:** <@${winner}>`)
+                    .setTimestamp();
+                await fetchMsg.edit({ content: '🎊 **GIVEAWAY ENDED!** 🎊', embeds: [endEmbed] });
+            } catch (e) {
+                console.error("Giveaway Error:", e);
+            }
+        }, timeMs);
+        return;
+    }
+    // --- 🎭 !role-setup (แผงรับยศ) [NEW FUNCTION] ---
+    if (message.content.startsWith('!role-setup')) {
+        if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
+
+        const embed = new EmbedBuilder()
+            .setColor('#E67E22')
+            .setTitle('🎭 เลือกรับยศที่ต้องการ')
+            .setDescription('กดปุ่มด้านล่างเพื่อรับหรือเอายศออกครับ');
+
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('role_gamer').setLabel('🎮 MLBB').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('role_music').setLabel('🎵 ROV').setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId('role_anime').setLabel('🎌 FC Online').setStyle(ButtonStyle.Danger)
+        );
+
+        await message.channel.send({ embeds: [embed], components: [row] });
+    }
 });
 
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isButton()) return;
+
+    // --- 🎭 Reaction Roles Handling ---
+    if (interaction.customId.startsWith('role_')) {
+        // ต้องไปสร้างยศชื่อ Gamer, Music Lover, Anime Fan ไว้ในเซิร์ฟเวอร์ก่อน
+        let roleName = '';
+        if (interaction.customId === 'role_gamer') roleName = 'MLBB';
+        if (interaction.customId === 'role_music') roleName = 'ROV';
+        if (interaction.customId === 'role_anime') roleName = 'FC Online';
+
+        const role = interaction.guild.roles.cache.find(r => r.name === roleName);
+        if (!role) {
+            return interaction.reply({ content: `❌ แอดมินยังไม่ได้สร้างยศ **${roleName}** ในเทียร์ตั้งค่าเซิร์ฟเวอร์ครับ`, flags: [MessageFlags.Ephemeral] });
+        }
+
+        const member = interaction.member;
+        if (member.roles.cache.has(role.id)) {
+            await member.roles.remove(role);
+            return interaction.reply({ content: `➖ ถอดยศ **${roleName}** ออกแล้ว`, flags: [MessageFlags.Ephemeral] });
+        } else {
+            await member.roles.add(role);
+            return interaction.reply({ content: `✅ ได้รับยศ **${roleName}** แล้ว`, flags: [MessageFlags.Ephemeral] });
+        }
+    }
 
     // Ticket (ความลับ)
     if (interaction.customId === 'btn_ticket') {
@@ -323,32 +585,95 @@ const AFK_CHANNEL_NAME = 'AFK';
 const AFK_TIMEOUT_MS = 30 * 60 * 1000; // 30 นาที
 const afkTimers = new Map(); // เก็บ userId -> timestamp
 
-client.on('voiceStateUpdate', (oldState, newState) => {
-    // ถ้าไม่ได้อยู่ในช่องเสียง ให้ลบ Timer
+// --- 🎙️ TEMP VOICE CHANNELS ---
+const TEMP_VOICE_CATEGORY_ID = '1474311710167924758'; // ใส่ ID หมวดหมู่ที่จะให้สร้างห้องเสียงใหม่ในนี้ (ถ้ามี)
+const TEMP_VOICE_CREATOR_ID = '1474311905031094399'; // ใส่ ID ห้องเสียงหลักที่คนต้องกดเข้าเพื่อสร้างห้องใหม่
+const tempVoiceChannels = new Map(); // เก็บ voiceChannelId -> ownerId
+
+client.on('voiceStateUpdate', async (oldState, newState) => {
+    // ----------------------------------------------------------------
+    // 1. ระบบ AFK System (ของเดิม)
+    // ----------------------------------------------------------------
     if (!newState.channelId) {
         afkTimers.delete(newState.member.id);
-        return;
+    } else {
+        const isAfk = newState.selfMute || newState.selfDeaf;
+        if (isAfk) {
+            if (!afkTimers.has(newState.member.id)) {
+                afkTimers.set(newState.member.id, Date.now());
+                console.log(`💤 ${newState.member.user.tag} เริ่ม AFK จับเวลา...`);
+            }
+        } else {
+            if (afkTimers.has(newState.member.id)) {
+                afkTimers.delete(newState.member.id);
+                console.log(`✅ ${newState.member.user.tag} กลับมา Active แล้ว`);
+            }
+        }
     }
 
-    // เช็คว่า Self-Mute หรือ Self-Deafen หรือไม่
-    const isAfk = newState.selfMute || newState.selfDeaf;
+    // ----------------------------------------------------------------
+    // 2. ระบบ Temp Voice Channels
+    // ----------------------------------------------------------------
 
-    if (isAfk) {
-        // ถ้าเริ่ม AFK และยังไม่มี Timer ให้เริ่มจับเวลา
-        if (!afkTimers.has(newState.member.id)) {
-            afkTimers.set(newState.member.id, Date.now());
-            console.log(`💤 ${newState.member.user.tag} เริ่ม AFK จับเวลา...`);
+    // ก) เมื่อคนกดเข้าห้อง "สร้างห้องส่วนตัว"
+    if (newState.channelId === TEMP_VOICE_CREATOR_ID && TEMP_VOICE_CREATOR_ID !== '') {
+        try {
+            const guild = newState.guild;
+            const member = newState.member;
+
+            // สร้างห้องเสียงใหม่
+            const newChannel = await guild.channels.create({
+                name: `🔊 ห้องของ ${member.user.username}`,
+                type: ChannelType.GuildVoice,
+                parent: TEMP_VOICE_CATEGORY_ID || newState.channel?.parentId || null,
+                permissionOverwrites: [
+                    {
+                        id: guild.id,
+                        allow: [PermissionFlagsBits.ViewChannel], // ให้ทุกคนเห็นห้อง
+                    },
+                    {
+                        id: member.id,
+                        allow: [
+                            PermissionFlagsBits.ViewChannel,
+                            PermissionFlagsBits.Connect,
+                            PermissionFlagsBits.Speak,
+                            PermissionFlagsBits.ManageChannels, // ให้เจ้าของจัดการห้องตัวเองได้ (เช่นเปลี่ยนชื่อ)
+                            PermissionFlagsBits.MoveMembers // ให้เตะคนอื่นได้
+                        ],
+                    },
+                ],
+            });
+
+            // ย้ายคนสร้างไปห้องใหม่
+            await member.voice.setChannel(newChannel);
+
+            // จำว่าห้องนี้สร้างโดยระบบ Temp Voice
+            tempVoiceChannels.set(newChannel.id, member.id);
+            console.log(`🎙️ สร้างห้องเสียงส่วนตัวใหม่: ${newChannel.name}`);
+
+        } catch (error) {
+            console.error("❌ สร้าง Temp Voice ไม่สำเร็จ:", error);
         }
-    } else {
-        // ถ้ากลับมาปกติ (เลิก Mute/Deafen) ให้ลบ Timer
-        if (afkTimers.has(newState.member.id)) {
-            afkTimers.delete(newState.member.id);
-            console.log(`✅ ${newState.member.user.tag} กลับมา Active แล้ว`);
+    }
+
+    // ข) เมื่อคนออกห้อง หรือย้ายห้อง เช็คว่าห้องเก่าว่างไหม และใช่ Temp Voice ไหม
+    if (oldState.channelId && oldState.channelId !== newState.channelId) {
+        const oldChannel = oldState.channel;
+
+        // ถ้าเป็นห้อง Temp Voice ที่สร้างไว้ และตอนนี้ไม่มีใครอยู่แล้ว
+        if (oldChannel && tempVoiceChannels.has(oldChannel.id) && oldChannel.members.size === 0) {
+            try {
+                await oldChannel.delete();
+                tempVoiceChannels.delete(oldChannel.id);
+                console.log(`🗑️ ลบห้องเสียงส่วนตัวที่ว่างแล้ว: ${oldChannel.name}`);
+            } catch (error) {
+                console.error("❌ ลบ Temp Voice ไม่สำเร็จ:", error);
+            }
         }
     }
 });
 
-// ตรวจสอบคน AFK ทุกๆ 1 นาที
+// ตรวจสอบคน AFK ทุกๆ 1 นาที (ของเดิม)
 setInterval(async () => {
     const now = Date.now();
     for (const [userId, startTime] of afkTimers) {
