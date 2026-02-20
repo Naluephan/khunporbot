@@ -31,6 +31,7 @@ const client = new Client({
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildVoiceStates, // เพิ่ม Intent อ่านสถานะห้องเสียง
     ],
 });
 
