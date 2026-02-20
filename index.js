@@ -502,7 +502,7 @@ client.on('messageCreate', async (message) => {
 
         const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('role_gamer').setLabel('🎮 MLBB').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('role_music').setLabel('🎵 ROV').setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId('role_music').setLabel('🎵 RoV').setStyle(ButtonStyle.Success),
             new ButtonBuilder().setCustomId('role_anime').setLabel('🎌 FC Online').setStyle(ButtonStyle.Danger)
         );
 
