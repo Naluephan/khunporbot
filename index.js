@@ -518,7 +518,7 @@ client.on('interactionCreate', async (interaction) => {
         // ต้องไปสร้างยศชื่อ Gamer, Music Lover, Anime Fan ไว้ในเซิร์ฟเวอร์ก่อน
         let roleName = '';
         if (interaction.customId === 'role_gamer') roleName = 'MLBB';
-        if (interaction.customId === 'role_music') roleName = 'ROV';
+        if (interaction.customId === 'role_music') roleName = 'RoV';
         if (interaction.customId === 'role_anime') roleName = 'FC Online';
 
         const role = interaction.guild.roles.cache.find(r => r.name === roleName);
