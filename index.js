@@ -56,6 +56,8 @@ const db = {
     lastLuck: new Map(),
 };
 
+const teamSessions = new Map(); // เก็บ messageId -> { hostId, players: Set<userId> }
+
 const fortunes = [
     { text: "วันนี้ดวงพุ่งแรงที่สุด! มีเกณฑ์ได้รับโชคลาภก้อนโต", color: "#FFD700" },
     { text: "การงานราบรื่น มีผู้ใหญ่คอยอุปถัมภ์คำชู", color: "#00FF00" },
@@ -492,7 +494,30 @@ client.on('messageCreate', async (message) => {
         }, timeMs);
         return;
     }
-    // --- 🎭 !role-setup (แผงรับยศ) [NEW FUNCTION] ---
+    // --- � !team หรือ !randomteam (สุ่มทีมจัดแข่ง) [NEW FUNCTION] ---
+    if (message.content.startsWith('!team') || message.content.startsWith('!randomteam')) {
+        const embed = new EmbedBuilder()
+            .setColor('#3498DB')
+            .setTitle('🎮 ระบบสุ่มทีม (Random Team)')
+            .setDescription(`**โฮสต์:** <@${message.author.id}>\n\n**ผู้เข้าร่วมปัจจุบัน (0 คน):**\n- ยังไม่มีผู้เข้าร่วม`)
+            .setFooter({ text: 'กดปุ่มด้านล่างเพื่อเข้าร่วม หรือสุ่มทีม' });
+
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('team_join').setLabel('เข้าร่วม').setStyle(ButtonStyle.Success).setEmoji('✋'),
+            new ButtonBuilder().setCustomId('team_leave').setLabel('ออก').setStyle(ButtonStyle.Danger).setEmoji('🚪'),
+            new ButtonBuilder().setCustomId('team_start').setLabel('เริ่มสุ่ม').setStyle(ButtonStyle.Primary).setEmoji('🎲'),
+            new ButtonBuilder().setCustomId('team_cancel').setLabel('ยกเลิก').setStyle(ButtonStyle.Secondary)
+        );
+
+        const teamMsg = await message.reply({ embeds: [embed], components: [row] });
+        teamSessions.set(teamMsg.id, {
+            hostId: message.author.id,
+            players: new Set()
+        });
+        return;
+    }
+
+    // --- �🎭 !role-setup (แผงรับยศ) [NEW FUNCTION] ---
     if (message.content.startsWith('!role-setup')) {
         if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
 
@@ -579,7 +604,102 @@ client.on('interactionCreate', async (interaction) => {
         db.lastWork.set(interaction.user.id, Date.now());
         await interaction.reply({ content: `🎉 รับเงินรายวัน 500 เหรียญแล้ว!`, flags: [MessageFlags.Ephemeral] });
     }
+
+    // --- 🎮 Random Team Handling ---
+    if (interaction.customId.startsWith('team_')) {
+        const session = teamSessions.get(interaction.message.id);
+        if (!session) {
+            return interaction.reply({ content: '❌ เซสชั่นการสุ่มทีมนี้จบไปหรือถูกยกเลิกแล้วครับ', flags: [MessageFlags.Ephemeral] });
+        }
+
+        if (interaction.customId === 'team_join') {
+            if (session.players.has(interaction.user.id)) {
+                return interaction.reply({ content: '⚠️ คุณอยู่ในรายชื่ออยู่แล้วครับ', flags: [MessageFlags.Ephemeral] });
+            }
+            session.players.add(interaction.user.id);
+            await updateTeamUI(interaction, session);
+        }
+
+        if (interaction.customId === 'team_leave') {
+            if (!session.players.has(interaction.user.id)) {
+                return interaction.reply({ content: '⚠️ คุณยังไม่ได้เข้าร่วมครับ', flags: [MessageFlags.Ephemeral] });
+            }
+            session.players.delete(interaction.user.id);
+            await updateTeamUI(interaction, session);
+        }
+
+        if (interaction.customId === 'team_start') {
+            if (interaction.user.id !== session.hostId && !interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+                return interaction.reply({ content: '❌ เฉพาะโฮสต์ที่สร้าง หรือแอดมินเท่านั้นที่สามารถกดเริ่มสุ่มได้ครับ', flags: [MessageFlags.Ephemeral] });
+            }
+
+            if (session.players.size < 2) {
+                return interaction.reply({ content: '⚠️ ต้องมีผู้เข้าร่วมอย่างน้อย 2 คนจึงจะสุ่มทีมได้ครับ', flags: [MessageFlags.Ephemeral] });
+            }
+
+            // สุ่มทีม
+            const playersArray = Array.from(session.players);
+            // Fisher-Yates shuffle
+            for (let i = playersArray.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [playersArray[i], playersArray[j]] = [playersArray[j], playersArray[i]];
+            }
+
+            const mid = Math.ceil(playersArray.length / 2);
+            const team1 = playersArray.slice(0, mid);
+            const team2 = playersArray.slice(mid);
+
+            const resultEmbed = new EmbedBuilder()
+                .setColor('#F1C40F')
+                .setTitle('🎲 ผลการสุ่มทีม (Random Team Result)')
+                .addFields(
+                    { name: `🔴 ทีมที่ 1 (${team1.length} คน)`, value: team1.map((id, index) => `${index + 1}. <@${id}>`).join('\n') || '- ไม่มี -', inline: true },
+                    { name: `🔵 ทีมที่ 2 (${team2.length} คน)`, value: team2.map((id, index) => `${index + 1}. <@${id}>`).join('\n') || '- ไม่มี -', inline: true }
+                )
+                .setFooter({ text: `สุ่มโดย: ${interaction.user.username}` })
+                .setTimestamp();
+
+            await interaction.update({ embeds: [resultEmbed], components: [] });
+            teamSessions.delete(interaction.message.id);
+        }
+
+        if (interaction.customId === 'team_cancel') {
+            if (interaction.user.id !== session.hostId && !interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+                return interaction.reply({ content: '❌ เฉพาะโฮสต์ที่สร้าง หรือแอดมินเท่านั้นที่สามารถยกเลิกได้ครับ', flags: [MessageFlags.Ephemeral] });
+            }
+
+            const cancelEmbed = new EmbedBuilder()
+                .setColor('#95A5A6')
+                .setTitle('🛑 การสุ่มทีมถูกยกเลิก')
+                .setDescription('เซสชั่นนี้ถูกยกเลิกแล้วครับ')
+                .setFooter({ text: `ยกเลิกโดย: ${interaction.user.username}` });
+
+            await interaction.update({ embeds: [cancelEmbed], components: [] });
+            teamSessions.delete(interaction.message.id);
+        }
+    }
 });
+
+// ----------------------------------------------------------------
+// 🎮 ระบบสุ่มทีม (Random Team) - ฟังก์ชันเสริม
+// ----------------------------------------------------------------
+async function updateTeamUI(interaction, session) {
+    const playersArray = Array.from(session.players);
+    const playersList = playersArray.length > 0 ? playersArray.map((id, index) => `${index + 1}. <@${id}>`).join('\n') : '- ยังไม่มีผู้เข้าร่วม';
+
+    let embed;
+    try {
+        embed = EmbedBuilder.from(interaction.message.embeds[0])
+            .setDescription(`**โฮสต์:** <@${session.hostId}>\n\n**ผู้เข้าร่วมปัจจุบัน (${playersArray.length} คน):**\n${playersList}`);
+    } catch (e) {
+        embed = new EmbedBuilder()
+            .setColor('#3498DB')
+            .setTitle('🎮 ระบบสุ่มทีม (Random Team)')
+            .setDescription(`**โฮสต์:** <@${session.hostId}>\n\n**ผู้เข้าร่วมปัจจุบัน (${playersArray.length} คน):**\n${playersList}`);
+    }
+
+    await interaction.update({ embeds: [embed] });
+}
 
 // --- 🎙️ TEMP VOICE CHANNELS ---
 const TEMP_VOICE_CATEGORY_ID = '1474311710167924758'; // ใส่ ID หมวดหมู่ที่จะให้สร้างห้องเสียงใหม่ในนี้ (ถ้ามี)
