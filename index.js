@@ -3,8 +3,6 @@ const {
     ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits,
     MessageFlags
 } = require('discord.js');
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus } = require('@discordjs/voice');
-const ytdl = require('ytdl-core');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const http = require('http'); // เพิ่มสำหรับ Web Server
 require('dotenv').config();
@@ -59,60 +57,6 @@ const db = {
 };
 
 const teamSessions = new Map(); // เก็บ messageId -> { hostId, players: Set<userId> }
-const queue = new Map(); // สำหรับระบบฟังเพลง เก็บ guildId -> music channel info
-
-// ฟังก์ชันเล่นเพลง
-async function playSong(guild, song) {
-    const serverQueue = queue.get(guild.id);
-    if (!song) {
-        if (serverQueue && serverQueue.connection) {
-            serverQueue.connection.destroy();
-        }
-        queue.delete(guild.id);
-        return;
-    }
-
-    try {
-        const stream = ytdl(song.url, { filter: 'audioonly', highWaterMark: 1 << 25 });
-        const resource = createAudioResource(stream);
-
-        serverQueue.player.play(resource);
-
-        serverQueue.player.once(AudioPlayerStatus.Idle, () => {
-            serverQueue.songs.shift();
-            playSong(guild, serverQueue.songs[0]);
-        });
-
-        serverQueue.player.on('error', error => {
-            console.error('Error in AudioPlayer:', error);
-            serverQueue.songs.shift();
-            playSong(guild, serverQueue.songs[0]);
-        });
-
-        // --- 🎛️ สร้าง UI เครื่องเล่นเพลง ---
-        const videoId = ytdl.getVideoID(song.url);
-        const embed = new EmbedBuilder()
-            .setColor('#1DB954')
-            .setTitle('🎶 กำลังเล่นเพลง')
-            .setDescription(`**[${song.title}](${song.url})**\n\n⏱️ เวลา: \`${Math.floor(song.duration / 60)}:${song.duration % 60 < 10 ? '0' : ''}${song.duration % 60}\``)
-            .setThumbnail(`https://img.youtube.com/vi/${videoId}/hqdefault.jpg`)
-            .setFooter({ text: 'ควบคุมเครื่องเล่นด้วยปุ่มด้านล่าง 👇' });
-
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('music_pause').setLabel('Pause/Resume').setStyle(ButtonStyle.Primary).setEmoji('⏯️'),
-            new ButtonBuilder().setCustomId('music_skip').setLabel('Skip').setStyle(ButtonStyle.Secondary).setEmoji('⏭️'),
-            new ButtonBuilder().setCustomId('music_stop').setLabel('Stop').setStyle(ButtonStyle.Danger).setEmoji('🛑'),
-            new ButtonBuilder().setCustomId('music_queue').setLabel('Queue').setStyle(ButtonStyle.Success).setEmoji('📜')
-        );
-
-        serverQueue.textChannel.send({ embeds: [embed], components: [row] });
-    } catch (err) {
-        console.error('PlaySong Error:', err);
-        serverQueue.textChannel.send('❌ เกิดข้อผิดพลาดในการเล่นเพลงนี้ จะข้ามไปเพลงถัดไป');
-        serverQueue.songs.shift();
-        playSong(guild, serverQueue.songs[0]);
-    }
-}
 
 const fortunes = [
     { text: "วันนี้ดวงพุ่งแรงที่สุด! มีเกณฑ์ได้รับโชคลาภก้อนโต", color: "#FFD700" },
@@ -245,8 +189,7 @@ client.on('messageCreate', async (message) => {
             .addFields(
                 { name: '🤖 AI & พูดคุย', value: '`!ask <คำถาม>` - ถามคำถาม AI\n`<Tag บอท> <คำถาม>` - คุยกับ AI' },
                 { name: '🛠️ ทั่วไป', value: '`!menu` - เปิดเมนูหลัก (สุ่มดวง, รับเงิน, Ticket)\n`!userinfo [@user]` - ดูข้อมูลผู้ใช้\n`!serverinfo` - ดูข้อมูลห้อง\n`!avatar [@user]` - ดูรูปโปรไฟล์\n`!ping` - เช็คความหน่วง' },
-                { name: '� ระบบฟังเพลง', value: '`!play <ลิงก์ youtube>` - เล่นเพลง\n`!skip` - ข้ามเพลงปัจจุบัน\n`!stop` - หยุดเพลงและเตะบอทออก\n`!queue` - ดูคิวเพลง' },
-                { name: '�🎮 บันเทิงและมินิเกม', value: '`!team` - เริ่มตั้งตี้สุ่มทีมเล่นเกม\n`!roll` - ทอยลูกเต๋า\n`!coin` - โยนเหรียญ\n`!rps <ค้อน/กรรไกร/กระดาษ>` - เป่ายิ้งฉุบ\n`!slots <เงินเดิมพัน>` - เล่นสล็อต' },
+                { name: '🎮 บันเทิงและมินิเกม', value: '`!team` - เริ่มตั้งตี้สุ่มทีมเล่นเกม\n`!roll` - ทอยลูกเต๋า\n`!coin` - โยนเหรียญ\n`!rps <ค้อน/กรรไกร/กระดาษ>` - เป่ายิ้งฉุบ\n`!slots <เงินเดิมพัน>` - เล่นสล็อต' },
                 { name: '💰 ระบบเศรษฐกิจ', value: '`!top` หรือ `!leaderboard` - ดูตารางอันดับเงิน/เลเวล' },
                 { name: '⚙️ เครื่องมือ', value: '`!calc <โจทย์>` - เครื่องคิดเลข\n`!poll <คำถาม>` - สร้างโพล\n`!remindme <เวลา m/h> <ข้อความ>` - ตั้งเวลาบอกเตือน' },
                 { name: '⚔️ แอดเวนเจอร์ / เกม', value: '`!hunt` - ออกล่ามอนสเตอร์รายชั่วโมง\n`!trivia` - เกมตอบคำถามความรู้ทั่วไปสุ่มหมวด' },
@@ -254,104 +197,6 @@ client.on('messageCreate', async (message) => {
             )
             .setFooter({ text: 'หากพิมพ์คำสั่งมี < > ไม่ต้องใส่ < > มาด้วยนะครับ' })
             .setTimestamp();
-
-        return message.reply({ embeds: [embed] });
-    }
-
-    // --- 🎶 ระบบฟังเพลง (Music Bot) [NEW FUNCTION] ---
-    if (message.content.startsWith('!play')) {
-        const args = message.content.split(' ');
-        const url = args[1];
-
-        if (!url || !ytdl.validateURL(url)) {
-            return message.reply('⚠️ กรุณาใส่ลิงก์ YouTube ที่ถูกต้อง เช่น `!play https://www.youtube.com/watch?v=...`');
-        }
-
-        const voiceChannel = message.member.voice.channel;
-        if (!voiceChannel) {
-            return message.reply('❌ คุณต้องอยู่ในห้องเสียง (Voice Channel) ก่อนครับจึงจะเปิดเพลงได้');
-        }
-
-        const serverQueue = queue.get(message.guild.id);
-
-        try {
-            const songInfo = await ytdl.getInfo(url);
-            const song = {
-                title: songInfo.videoDetails.title,
-                url: songInfo.videoDetails.video_url,
-                duration: songInfo.videoDetails.lengthSeconds
-            };
-
-            if (!serverQueue) {
-                const queueContruct = {
-                    textChannel: message.channel,
-                    voiceChannel: voiceChannel,
-                    connection: null,
-                    songs: [],
-                    player: createAudioPlayer(),
-                    playing: true,
-                };
-
-                queue.set(message.guild.id, queueContruct);
-                queueContruct.songs.push(song);
-
-                try {
-                    const connection = joinVoiceChannel({
-                        channelId: voiceChannel.id,
-                        guildId: message.guild.id,
-                        adapterCreator: message.guild.voiceAdapterCreator,
-                    });
-                    queueContruct.connection = connection;
-                    queueContruct.connection.subscribe(queueContruct.player);
-
-                    playSong(message.guild, queueContruct.songs[0]);
-                } catch (err) {
-                    console.log(err);
-                    queue.delete(message.guild.id);
-                    return message.reply('❌ ไม่สามารถเข้าห้องเสียงได้ครับ');
-                }
-            } else {
-                serverQueue.songs.push(song);
-                return message.reply(`🎵 เพิ่ม **${song.title}** ลงในคิวแล้ว`);
-            }
-        } catch (error) {
-            console.error(error);
-            return message.reply('❌ เกิดข้อผิดพลาดในการดึงข้อมูลเพลง');
-        }
-        return;
-    }
-
-    if (message.content.startsWith('!skip')) {
-        const serverQueue = queue.get(message.guild.id);
-        if (!message.member.voice.channel) return message.reply('❌ คุณต้องอยู่ในห้องเสียงเพื่อข้ามเพลง');
-        if (!serverQueue) return message.reply('❌ ไม่มีเพลงให้ข้ามครับ');
-
-        serverQueue.player.stop();
-        return message.reply('⏭️ ข้ามเพลงแล้ว');
-    }
-
-    if (message.content.startsWith('!stop')) {
-        const serverQueue = queue.get(message.guild.id);
-        if (!message.member.voice.channel) return message.reply('❌ คุณต้องอยู่ในห้องเสียงเพื่อหยุดเพลง');
-        if (!serverQueue) return message.reply('❌ ไม่ได้เล่นเพลงอยู่ครับ');
-
-        serverQueue.songs = [];
-        serverQueue.player.stop();
-        serverQueue.connection.destroy();
-        queue.delete(message.guild.id);
-        return message.reply('🛑 หยุดเล่นเพลงและออกจากห้องเสียงแล้ว');
-    }
-
-    if (message.content.startsWith('!queue')) {
-        const serverQueue = queue.get(message.guild.id);
-        if (!serverQueue || serverQueue.songs.length === 0) return message.reply('❌ ไม่มีเพลงในคิวครับ');
-
-        const qList = serverQueue.songs.map((s, idx) => `${idx === 0 ? '**กำลังเล่น:**' : `${idx}.`} ${s.title}`).join('\n');
-
-        const embed = new EmbedBuilder()
-            .setColor('#1DB954')
-            .setTitle('🎶 คิวเพลงปัจจุบัน')
-            .setDescription(qList);
 
         return message.reply({ embeds: [embed] });
     }
@@ -814,53 +659,6 @@ client.on('messageCreate', async (message) => {
 
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isButton()) return;
-
-    // --- 🎶 Music Bot UI Handling ---
-    if (interaction.customId.startsWith('music_')) {
-        const serverQueue = queue.get(interaction.guild.id);
-        if (!interaction.member.voice.channel) {
-            return interaction.reply({ content: '❌ คุณต้องอยู่ในห้องเสียงเพื่อควบคุมเพลงครับ', flags: [MessageFlags.Ephemeral] });
-        }
-        if (!serverQueue || !serverQueue.player) {
-            return interaction.reply({ content: '❌ ตอนนี้ไม่ได้เล่นเพลงอะไรอยู่เลยครับ', flags: [MessageFlags.Ephemeral] });
-        }
-
-        if (interaction.customId === 'music_pause') {
-            if (serverQueue.player.state.status === AudioPlayerStatus.Playing) {
-                serverQueue.player.pause();
-                return interaction.reply({ content: '⏸️ หยุดเพลงชั่วคราวแล้วครับ', flags: [MessageFlags.Ephemeral] });
-            } else if (serverQueue.player.state.status === AudioPlayerStatus.Paused) {
-                serverQueue.player.unpause();
-                return interaction.reply({ content: '▶️ เล่นเพลงต่อแล้วครับ', flags: [MessageFlags.Ephemeral] });
-            } else {
-                return interaction.reply({ content: '⚠️ สถานะเครื่องเล่นไม่พร้อมครับ', flags: [MessageFlags.Ephemeral] });
-            }
-        }
-
-        if (interaction.customId === 'music_skip') {
-            serverQueue.player.stop();
-            return interaction.reply({ content: '⏭️ ข้ามเพลงเรียบร้อยครับ (เพลงถัดไปจะขึ้นทันที)', flags: [MessageFlags.Ephemeral] });
-        }
-
-        if (interaction.customId === 'music_stop') {
-            serverQueue.songs = [];
-            serverQueue.player.stop();
-            if (serverQueue.connection) serverQueue.connection.destroy();
-            queue.delete(interaction.guild.id);
-            await interaction.message.edit({ components: [] }).catch(() => { }); // ลบปุ่มออก
-            return interaction.reply({ content: '🛑 หยุดเล่นเพลงและออกจากห้องเสียงแล้วครับ', flags: [MessageFlags.Ephemeral] });
-        }
-
-        if (interaction.customId === 'music_queue') {
-            if (serverQueue.songs.length === 0) return interaction.reply({ content: '❌ ไม่มีเพลงในคิวครับ', flags: [MessageFlags.Ephemeral] });
-            const qList = serverQueue.songs.slice(0, 10).map((s, idx) => `${idx === 0 ? '**กำลังเล่น:**' : `${idx}.`} ${s.title}`).join('\n');
-            const embed = new EmbedBuilder()
-                .setColor('#1DB954')
-                .setTitle(`🎶 คิวเพลงปัจจุบัน (ทั้งหมด ${serverQueue.songs.length} เพลง)`)
-                .setDescription(qList + (serverQueue.songs.length > 10 ? '\n...และอีกมากมาย' : ''));
-            return interaction.reply({ embeds: [embed], flags: [MessageFlags.Ephemeral] });
-        }
-    }
 
     // --- 🎭 Reaction Roles Handling ---
     if (interaction.customId.startsWith('role_')) {
