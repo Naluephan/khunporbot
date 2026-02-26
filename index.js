@@ -32,6 +32,7 @@ const client = new Client({
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildVoiceStates, // เพิ่ม Intent อ่านสถานะห้องเสียง
+        GatewayIntentBits.GuildMembers, // ต้องมี Intent นี้ Bot ถึงจะรู้ว่ามีคนเข้าเซิร์ฟเวอร์
     ],
 });
 
