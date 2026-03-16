@@ -17,6 +17,7 @@
     "dpkg": "^1.0.0",
     "express": "^5.2.1",
     "mathjs": "^15.1.0",
+    "mongodb": "^7.1.0",
     "mongoose": "^9.2.1",
     "opusscript": "^0.0.8"
   }
