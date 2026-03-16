@@ -3,26 +3,36 @@ const {
     ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits,
     MessageFlags
 } = require('discord.js');
+
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const http = require('http'); // เพิ่มสำหรับ Web Server
 require('dotenv').config();
 
-// --- 🌐 WEB SERVER (Keep-Alive) ---
+const express = require('express');
+const app = express();
+
+
+// ===============================
+// 🌐 WEB SERVER (Render Keep Alive)
+// ===============================
+
 const PORT = process.env.PORT || 3000;
-const server = http.createServer((req, res) => {
-    res.write("Bot is running!");
-    res.end();
+
+// หน้าเว็บหลัก
+app.get('/', (req, res) => {
+    res.status(200).send('🤖 KhunPor Discord Bot is running!');
 });
 
-// เริ่มรัน Web Server แบบดักจับ Error
-server.listen(PORT, () => {
-    console.log(`🌐 Web/Keep-Alive server active on port ${PORT}`);
-}).on('error', (err) => {
-    if (err.code === 'EADDRINUSE') {
-        console.log(`⚠️ Port ${PORT} ล็อคอยู่ (เครื่องคุณอาจมีโปรแกรมอื่นใช้) : ระบบบอทจะยังทำงานต่อตามปกติครับ`);
-    } else {
-        console.error('Web Server Error:', err);
-    }
+// health check สำหรับ Render / UptimeRobot
+app.get('/health', (req, res) => {
+    res.status(200).json({
+        status: "ok",
+        bot: "running"
+    });
+});
+
+// start server
+app.listen(PORT, () => {
+    console.log(`🌐 Web server running on port ${PORT}`);
 });
 // --------------------------------
 
@@ -889,6 +899,14 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
             }
         }
     }
+});
+
+process.on("unhandledRejection", (error) => {
+    console.error("Unhandled Promise Rejection:", error);
+});
+
+process.on("uncaughtException", (error) => {
+    console.error("Uncaught Exception:", error);
 });
 
 client.login(process.env.DISCORD_TOKEN);
